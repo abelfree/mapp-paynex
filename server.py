@@ -115,6 +115,13 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE ad_sessions ADD COLUMN cooldown INTEGER")
 
 
+def ensure_user_columns(conn: sqlite3.Connection) -> None:
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
+    if "play_daily" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN play_daily INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
+
+
 def init_db() -> None:
     conn = db()
     conn.executescript(
@@ -200,6 +207,7 @@ def ensure_task_rows(conn: sqlite3.Connection, telegram_id: int, task_map: dict[
 
 
 def ensure_user(conn: sqlite3.Connection, telegram_id: int, username: str, task_map: dict[int, dict]) -> sqlite3.Row:
+    ensure_user_columns(conn)
     row = conn.execute("SELECT * FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
     if not row:
         conn.execute(
@@ -213,6 +221,7 @@ def ensure_user(conn: sqlite3.Connection, telegram_id: int, username: str, task_
 
 
 def refresh_daily(conn: sqlite3.Connection, telegram_id: int) -> sqlite3.Row:
+    ensure_user_columns(conn)
     row = conn.execute("SELECT * FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="User not found")
