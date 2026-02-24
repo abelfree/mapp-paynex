@@ -1,75 +1,83 @@
 from __future__ import annotations
 
-import json
 import os
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
 from uuid import uuid4
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-try:
-    from dotenv import load_dotenv
-except Exception:  # pragma: no cover
-    load_dotenv = None
-
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "mapp.db"
-
-if load_dotenv:
-    load_dotenv(BASE_DIR / ".env")
-
-TASKS = [
-    {"id": 1, "title": "Web Visit 15s", "reward": 0.10, "cooldown": 15},
-    {"id": 2, "title": "Web Visit 30s", "reward": 0.10, "cooldown": 30},
-    {"id": 3, "title": "Visit Website 50s", "reward": 0.10, "cooldown": 50},
-    {"id": 4, "title": "Watch Short Video", "reward": 0.10, "cooldown": 45},
-    {"id": 5, "title": "Join Telegram Channel", "reward": 0.10, "cooldown": 60},
-    {"id": 6, "title": "Visit Website 1 Min", "reward": 0.15, "cooldown": 60},
-]
-TASK_MAP = {task["id"]: task for task in TASKS}
-
-DAILY_LIMIT = 15
-MIN_WITHDRAW = 5.0
-DEMO_USER_ID = 1
-AD_SESSION_TTL_MINUTES = 20
+load_dotenv(BASE_DIR.parent / ".env")
 
 MONETAG_SDK_SRC = os.getenv("MONETAG_SDK_SRC", "").strip()
-MONETAG_MAIN_ZONE = os.getenv("MONETAG_MAIN_ZONE", "").strip()
+MONETAG_ZONE_ID = os.getenv("MONETAG_ZONE_ID", "").strip()
 MONETAG_SHOW_FN = os.getenv("MONETAG_SHOW_FN", "").strip()
+MONETAG_VIDEO_SHOW_FN = os.getenv("MONETAG_VIDEO_SHOW_FN", "").strip()
 MONETAG_POSTBACK_TOKEN = os.getenv("MONETAG_POSTBACK_TOKEN", "").strip()
-ALLOW_SIMULATE_VALUED = os.getenv("ALLOW_SIMULATE_VALUED", "true").lower() == "true"
+ADS_ALLOW_SIMULATE = os.getenv("ADS_ALLOW_SIMULATE", "true").lower() == "true"
+
+DAILY_LIMIT = int(os.getenv("DAILY_LIMIT", "10"))
+MIN_WITHDRAW = float(os.getenv("MIN_WITHDRAW", "5.0"))
+_macro_count = int(os.getenv("MONETAG_MACRO_TASKS_PER_DAY", "4"))
+MONETAG_MACRO_TASKS_PER_DAY = max(1, min(_macro_count, 8))
+
+MICRO_TASKS = [
+    {"id": 1, "title": "Web Visit 15s", "reward": 0.10, "cooldown": 15, "kind": "web", "tier": "micro"},
+    {"id": 2, "title": "Web Visit 30s", "reward": 0.10, "cooldown": 30, "kind": "web", "tier": "micro"},
+    {"id": 3, "title": "Web Visit 50s", "reward": 0.10, "cooldown": 50, "kind": "web", "tier": "micro"},
+    {"id": 4, "title": "Watch Short Video", "reward": 0.10, "cooldown": 45, "kind": "video", "tier": "micro"},
+    {"id": 5, "title": "Watch Rewarded Clip", "reward": 0.12, "cooldown": 60, "kind": "video", "tier": "micro"},
+]
+
+MACRO_TEMPLATES = [
+    {"title": "Watch Premium Video", "reward": 0.25, "cooldown": 120, "kind": "video", "tier": "macro"},
+    {"title": "Complete Survey Offer", "reward": 0.35, "cooldown": 180, "kind": "web", "tier": "macro"},
+    {"title": "Open Offer Wall Deal", "reward": 0.30, "cooldown": 150, "kind": "web", "tier": "macro"},
+    {"title": "Watch Long Video", "reward": 0.28, "cooldown": 150, "kind": "video", "tier": "macro"},
+    {"title": "Try Partner Landing Page", "reward": 0.22, "cooldown": 120, "kind": "web", "tier": "macro"},
+    {"title": "Complete Video Challenge", "reward": 0.32, "cooldown": 180, "kind": "video", "tier": "macro"},
+]
 
 
-class WithdrawRequest(BaseModel):
-    method: str = Field(min_length=2, max_length=40)
-    account: str = Field(min_length=3, max_length=120)
-    amount: float = Field(gt=0)
-
-
-class WithdrawResponse(BaseModel):
-    ok: bool
-    message: str
-    balance: float
-
-
-class AccountCheckRequest(BaseModel):
+class StateRequest(BaseModel):
     telegram_id: int = Field(gt=0)
+    username: str = "user"
     device_id: str = Field(min_length=8, max_length=128)
 
 
-class StartTaskResponse(BaseModel):
-    session_id: str
-    ad_url: str
+class StartAdRequest(BaseModel):
+    telegram_id: int = Field(gt=0)
+    task_id: int = Field(gt=0)
 
 
-app = FastAPI(title="Mapp Task Platform")
+class WithdrawRequest(BaseModel):
+    telegram_id: int = Field(gt=0)
+    method: str = Field(min_length=2)
+    account: str = Field(min_length=3)
+    amount: float = Field(gt=0)
+
+
+app = FastAPI(title="momoney API")
 app.mount("/static", StaticFiles(directory=BASE_DIR), name="static")
+
+
+def now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def today_str() -> str:
+    return now().strftime("%Y-%m-%d")
+
+
+def today_int() -> int:
+    return int(now().strftime("%Y%m%d"))
 
 
 def db() -> sqlite3.Connection:
@@ -78,27 +86,24 @@ def db() -> sqlite3.Connection:
     return conn
 
 
-def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+def _migrate(conn: sqlite3.Connection) -> None:
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(ad_sessions)").fetchall()}
+    if "task_title" not in cols:
+        conn.execute("ALTER TABLE ad_sessions ADD COLUMN task_title TEXT")
+    if "task_kind" not in cols:
+        conn.execute("ALTER TABLE ad_sessions ADD COLUMN task_kind TEXT")
+    if "reward" not in cols:
+        conn.execute("ALTER TABLE ad_sessions ADD COLUMN reward REAL")
+    if "cooldown" not in cols:
+        conn.execute("ALTER TABLE ad_sessions ADD COLUMN cooldown INTEGER")
 
 
-def day_stamp(dt: datetime) -> str:
-    return dt.astimezone(timezone.utc).strftime("%Y-%m-%d")
-
-
-def task_by_id(task_id: int) -> dict[str, Any]:
-    task = TASK_MAP.get(task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    return task
-
-
-def setup_db() -> None:
+def init_db() -> None:
     conn = db()
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY,
+            telegram_id INTEGER PRIMARY KEY,
             username TEXT NOT NULL,
             balance REAL NOT NULL DEFAULT 0,
             ads_watched INTEGER NOT NULL DEFAULT 0,
@@ -107,15 +112,15 @@ def setup_db() -> None:
         );
 
         CREATE TABLE IF NOT EXISTS task_runs (
-            user_id INTEGER NOT NULL,
+            telegram_id INTEGER NOT NULL,
             task_id INTEGER NOT NULL,
             next_available_at TEXT NOT NULL,
-            PRIMARY KEY(user_id, task_id)
+            PRIMARY KEY(telegram_id, task_id)
         );
 
         CREATE TABLE IF NOT EXISTS withdrawals (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
+            telegram_id INTEGER NOT NULL,
             method TEXT NOT NULL,
             account TEXT NOT NULL,
             amount REAL NOT NULL,
@@ -123,187 +128,113 @@ def setup_db() -> None:
             created_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS device_accounts (
+            device_id TEXT NOT NULL,
+            telegram_id INTEGER NOT NULL,
+            first_seen_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL,
+            PRIMARY KEY(device_id, telegram_id)
+        );
+
         CREATE TABLE IF NOT EXISTS ad_sessions (
             id TEXT PRIMARY KEY,
             ymid TEXT NOT NULL UNIQUE,
-            user_id INTEGER NOT NULL,
+            telegram_id INTEGER NOT NULL,
             task_id INTEGER NOT NULL,
-            provider TEXT NOT NULL,
+            task_title TEXT,
+            task_kind TEXT,
+            reward REAL,
+            cooldown INTEGER,
             status TEXT NOT NULL,
             credited INTEGER NOT NULL DEFAULT 0,
-            request_var TEXT NOT NULL,
             created_at TEXT NOT NULL,
-            expires_at TEXT NOT NULL,
-            completed_at TEXT,
-            credited_at TEXT
-        );
-
-        CREATE TABLE IF NOT EXISTS ad_postbacks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ymid TEXT,
-            event_type TEXT,
-            reward_event_type TEXT,
-            zone_id TEXT,
-            sub_zone_id TEXT,
-            telegram_id TEXT,
-            request_var TEXT,
-            payload_json TEXT NOT NULL,
-            created_at TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS device_accounts (
-            device_id TEXT NOT NULL,
-            user_id INTEGER NOT NULL,
-            first_seen_at TEXT NOT NULL,
-            last_seen_at TEXT NOT NULL,
-            PRIMARY KEY(device_id, user_id)
+            expires_at TEXT NOT NULL
         );
         """
     )
-
-    today = day_stamp(utcnow())
-    exists = conn.execute("SELECT id FROM users WHERE id = ?", (DEMO_USER_ID,)).fetchone()
-    if not exists:
-        conn.execute(
-            """
-            INSERT INTO users (id, username, balance, ads_watched, daily_ads, daily_stamp)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (DEMO_USER_ID, "abel", 1.9, 10, 10, today),
-        )
-
-    for task in TASKS:
-        present = conn.execute(
-            "SELECT 1 FROM task_runs WHERE user_id = ? AND task_id = ?",
-            (DEMO_USER_ID, task["id"]),
-        ).fetchone()
-        if not present:
-            conn.execute(
-                "INSERT INTO task_runs (user_id, task_id, next_available_at) VALUES (?, ?, ?)",
-                (DEMO_USER_ID, task["id"], "1970-01-01T00:00:00+00:00"),
-            )
-
+    _migrate(conn)
     conn.commit()
     conn.close()
 
 
-def refresh_daily(conn: sqlite3.Connection, user_id: int) -> sqlite3.Row:
-    user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+def build_task_catalog(telegram_id: int) -> list[dict]:
+    tasks = [dict(t) for t in MICRO_TASKS]
+    seed = today_int() + telegram_id
+    daily_base = 2_000_000 + today_int() * 10
+    for idx in range(MONETAG_MACRO_TASKS_PER_DAY):
+        template = MACRO_TEMPLATES[(seed + idx) % len(MACRO_TEMPLATES)]
+        task = dict(template)
+        task["id"] = daily_base + idx + 1
+        tasks.append(task)
+    return tasks
 
-    today = day_stamp(utcnow())
-    if user["daily_stamp"] != today:
+
+def build_task_map(telegram_id: int) -> dict[int, dict]:
+    return {int(t["id"]): t for t in build_task_catalog(telegram_id)}
+
+
+def ensure_task_rows(conn: sqlite3.Connection, telegram_id: int, task_map: dict[int, dict]) -> None:
+    for task_id in task_map:
         conn.execute(
-            "UPDATE users SET daily_ads = 0, daily_stamp = ? WHERE id = ?",
-            (today, user_id),
+            "INSERT OR IGNORE INTO task_runs (telegram_id, task_id, next_available_at) VALUES (?, ?, ?)",
+            (telegram_id, int(task_id), "1970-01-01T00:00:00+00:00"),
         )
+
+
+def ensure_user(conn: sqlite3.Connection, telegram_id: int, username: str, task_map: dict[int, dict]) -> sqlite3.Row:
+    row = conn.execute("SELECT * FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
+    if not row:
+        conn.execute(
+            "INSERT INTO users (telegram_id, username, balance, ads_watched, daily_ads, daily_stamp) VALUES (?, ?, ?, ?, ?, ?)",
+            (telegram_id, username, 0, 0, 0, today_str()),
+        )
+        row = conn.execute("SELECT * FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
+    ensure_task_rows(conn, telegram_id, task_map)
+    conn.commit()
+    return row
+
+
+def refresh_daily(conn: sqlite3.Connection, telegram_id: int) -> sqlite3.Row:
+    row = conn.execute("SELECT * FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="User not found")
+    if row["daily_stamp"] != today_str():
+        conn.execute("UPDATE users SET daily_ads = 0, daily_stamp = ? WHERE telegram_id = ?", (today_str(), telegram_id))
         conn.commit()
-        user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        row = conn.execute("SELECT * FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
+    return row
 
-    return user
 
-
-def task_with_status(conn: sqlite3.Connection, user_id: int) -> list[dict[str, Any]]:
-    now = utcnow()
-    rows = conn.execute(
-        "SELECT task_id, next_available_at FROM task_runs WHERE user_id = ?",
-        (user_id,),
-    ).fetchall()
-    next_map = {row["task_id"]: datetime.fromisoformat(row["next_available_at"]) for row in rows}
-
-    active_rows = conn.execute(
-        """
-        SELECT id, task_id FROM ad_sessions
-        WHERE user_id = ?
-          AND status IN ('created', 'client_done')
-          AND expires_at > ?
-        """,
-        (user_id, now.isoformat()),
-    ).fetchall()
-    active_map = {row["task_id"]: row["id"] for row in active_rows}
-
-    out: list[dict[str, Any]] = []
-    for task in TASKS:
-        next_at = next_map.get(task["id"], datetime(1970, 1, 1, tzinfo=timezone.utc))
-        secs = max(0, int((next_at - now).total_seconds()))
+def task_payload(conn: sqlite3.Connection, telegram_id: int, task_map: dict[int, dict]) -> list[dict]:
+    n = now()
+    runs = conn.execute("SELECT task_id, next_available_at FROM task_runs WHERE telegram_id = ?", (telegram_id,)).fetchall()
+    next_map = {int(r["task_id"]): datetime.fromisoformat(r["next_available_at"]) for r in runs}
+    out = []
+    for task_id, task in task_map.items():
+        rem = max(0, int((next_map.get(task_id, datetime(1970, 1, 1, tzinfo=timezone.utc)) - n).total_seconds()))
         out.append(
             {
-                "id": task["id"],
+                "id": task_id,
                 "title": task["title"],
-                "reward": task["reward"],
-                "cooldown": task["cooldown"],
-                "remaining_seconds": secs,
-                "active_session_id": active_map.get(task["id"]),
+                "reward": float(task["reward"]),
+                "remaining_seconds": rem,
+                "kind": task.get("kind", "web"),
+                "tier": task.get("tier", "micro"),
             }
         )
+    out.sort(key=lambda t: (0 if t["tier"] == "micro" else 1, t["id"]))
     return out
 
 
-def can_start_task(conn: sqlite3.Connection, user: sqlite3.Row, task_id: int) -> None:
-    if int(user["daily_ads"]) >= DAILY_LIMIT:
-        raise HTTPException(status_code=400, detail="Daily limit reached")
-
-    row = conn.execute(
-        "SELECT next_available_at FROM task_runs WHERE user_id = ? AND task_id = ?",
-        (DEMO_USER_ID, task_id),
-    ).fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="Task tracking not found")
-
-    now = utcnow()
-    next_available_at = datetime.fromisoformat(row["next_available_at"])
-    if next_available_at > now:
-        seconds = int((next_available_at - now).total_seconds())
-        raise HTTPException(status_code=400, detail=f"Task on cooldown: {seconds}s")
-
-
-def credit_session(conn: sqlite3.Connection, session: sqlite3.Row) -> bool:
-    if int(session["credited"]) == 1:
-        return False
-
-    now = utcnow()
-    if datetime.fromisoformat(session["expires_at"]) < now:
-        return False
-
-    task = task_by_id(int(session["task_id"]))
-    user = refresh_daily(conn, int(session["user_id"]))
-
-    if int(user["daily_ads"]) >= DAILY_LIMIT:
-        return False
-
-    new_balance = round(float(user["balance"]) + float(task["reward"]), 3)
-    new_ads = int(user["ads_watched"]) + 1
-    new_daily = int(user["daily_ads"]) + 1
-    next_at = now + timedelta(seconds=int(task["cooldown"]))
-
-    conn.execute(
-        "UPDATE users SET balance = ?, ads_watched = ?, daily_ads = ? WHERE id = ?",
-        (new_balance, new_ads, new_daily, int(session["user_id"])),
-    )
-    conn.execute(
-        "UPDATE task_runs SET next_available_at = ? WHERE user_id = ? AND task_id = ?",
-        (next_at.isoformat(), int(session["user_id"]), int(session["task_id"])),
-    )
-    conn.execute(
-        """
-        UPDATE ad_sessions
-        SET credited = 1, status = 'verified', credited_at = ?, completed_at = COALESCE(completed_at, ?)
-        WHERE id = ?
-        """,
-        (now.isoformat(), now.isoformat(), session["id"]),
-    )
-    conn.commit()
-    return True
-
-
-def monetag_enabled() -> bool:
-    return bool(MONETAG_SDK_SRC and MONETAG_MAIN_ZONE)
+def show_fn_for_kind(kind: str) -> str:
+    if kind == "video" and MONETAG_VIDEO_SHOW_FN:
+        return MONETAG_VIDEO_SHOW_FN
+    return MONETAG_SHOW_FN or (f"show_{MONETAG_ZONE_ID}" if MONETAG_ZONE_ID else "")
 
 
 @app.on_event("startup")
-def on_startup() -> None:
-    setup_db()
+def startup() -> None:
+    init_db()
 
 
 @app.get("/")
@@ -311,294 +242,213 @@ def home() -> FileResponse:
     return FileResponse(BASE_DIR / "index.html")
 
 
-@app.get("/task")
-def task_page() -> FileResponse:
-    return FileResponse(BASE_DIR / "ad-task.html")
-
-
-@app.get("/api/me")
-def me() -> dict[str, Any]:
+@app.post("/api/state")
+def state(req: StateRequest):
     conn = db()
-    user = refresh_daily(conn, DEMO_USER_ID)
+    task_map = build_task_map(req.telegram_id)
+    ensure_user(conn, req.telegram_id, req.username, task_map)
+    u = refresh_daily(conn, req.telegram_id)
+
+    n = now().isoformat()
+    conn.execute(
+        "INSERT INTO device_accounts (device_id, telegram_id, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?) ON CONFLICT(device_id, telegram_id) DO UPDATE SET last_seen_at = excluded.last_seen_at",
+        (req.device_id, req.telegram_id, n, n),
+    )
+    c = conn.execute("SELECT COUNT(DISTINCT telegram_id) AS c FROM device_accounts WHERE device_id = ?", (req.device_id,)).fetchone()
+    conn.commit()
+
+    all_tasks = task_payload(conn, req.telegram_id, task_map)
+    micro_tasks = [t for t in all_tasks if t["tier"] == "micro"]
+    macro_tasks = [t for t in all_tasks if t["tier"] == "macro"]
     payload = {
-        "username": user["username"],
-        "balance": round(float(user["balance"]), 3),
-        "ads_watched": int(user["ads_watched"]),
-        "daily_ads": int(user["daily_ads"]),
+        "username": u["username"],
+        "balance": round(float(u["balance"]), 3),
+        "ads_watched": int(u["ads_watched"]),
+        "daily_ads": int(u["daily_ads"]),
         "daily_limit": DAILY_LIMIT,
         "referrals": 0,
+        "multiple_accounts": int(c["c"]) > 1,
+        "tasks": all_tasks,
+        "micro_tasks": micro_tasks,
+        "macro_tasks": macro_tasks,
+        "monetag": {
+            "enabled": bool(MONETAG_SDK_SRC and MONETAG_ZONE_ID),
+            "sdk_src": MONETAG_SDK_SRC,
+            "show_fn": show_fn_for_kind("web"),
+            "video_show_fn": show_fn_for_kind("video"),
+        },
     }
     conn.close()
     return payload
 
 
-@app.get("/api/tasks")
-def list_tasks() -> list[dict[str, Any]]:
+@app.post("/api/ads/start")
+def start_ad(req: StartAdRequest):
     conn = db()
-    refresh_daily(conn, DEMO_USER_ID)
-    payload = task_with_status(conn, DEMO_USER_ID)
-    conn.close()
-    return payload
-
-
-@app.post("/api/account/check")
-def account_check(req: AccountCheckRequest) -> dict[str, Any]:
-    now = utcnow().isoformat()
-    conn = db()
-    conn.execute(
-        """
-        INSERT INTO device_accounts (device_id, user_id, first_seen_at, last_seen_at)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(device_id, user_id)
-        DO UPDATE SET last_seen_at = excluded.last_seen_at
-        """,
-        (req.device_id, req.telegram_id, now, now),
-    )
-    row = conn.execute(
-        "SELECT COUNT(DISTINCT user_id) AS c FROM device_accounts WHERE device_id = ?",
-        (req.device_id,),
-    ).fetchone()
-    conn.commit()
-    conn.close()
-    account_count = int(row["c"]) if row else 0
-    return {"multiple_accounts": account_count > 1, "account_count": account_count}
-
-
-@app.post("/api/tasks/{task_id}/start", response_model=StartTaskResponse)
-def start_task(task_id: int) -> StartTaskResponse:
-    task_by_id(task_id)
-
-    conn = db()
-    user = refresh_daily(conn, DEMO_USER_ID)
-    can_start_task(conn, user, task_id)
-
-    now = utcnow()
-    existing = conn.execute(
-        """
-        SELECT id FROM ad_sessions
-        WHERE user_id = ?
-          AND task_id = ?
-          AND status IN ('created', 'client_done')
-          AND expires_at > ?
-        ORDER BY created_at DESC
-        LIMIT 1
-        """,
-        (DEMO_USER_ID, task_id, now.isoformat()),
-    ).fetchone()
-
-    if existing:
+    task_map = build_task_map(req.telegram_id)
+    task = task_map.get(req.task_id)
+    if not task:
         conn.close()
-        session_id = existing["id"]
-        return StartTaskResponse(session_id=session_id, ad_url=f"/task?sid={session_id}")
+        raise HTTPException(status_code=404, detail="Task not found")
 
-    session_id = str(uuid4())
-    ymid = f"u{DEMO_USER_ID}_t{task_id}_{uuid4().hex[:12]}"
-    expires_at = now + timedelta(minutes=AD_SESSION_TTL_MINUTES)
+    ensure_task_rows(conn, req.telegram_id, task_map)
+    u = refresh_daily(conn, req.telegram_id)
+    if int(u["daily_ads"]) >= DAILY_LIMIT:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Daily limit reached")
 
+    run = conn.execute(
+        "SELECT next_available_at FROM task_runs WHERE telegram_id = ? AND task_id = ?",
+        (req.telegram_id, req.task_id),
+    ).fetchone()
+    if not run:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Task run row missing")
+
+    if datetime.fromisoformat(run["next_available_at"]) > now():
+        conn.close()
+        raise HTTPException(status_code=400, detail="Task cooling down")
+
+    sid = str(uuid4())
+    ymid = f"u{req.telegram_id}_t{req.task_id}_{uuid4().hex[:10]}"
     conn.execute(
-        """
-        INSERT INTO ad_sessions (
-          id, ymid, user_id, task_id, provider, status, credited, request_var, created_at, expires_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
+        "INSERT INTO ad_sessions (id, ymid, telegram_id, task_id, task_title, task_kind, reward, cooldown, status, credited, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'created', 0, ?, ?)",
         (
-            session_id,
+            sid,
             ymid,
-            DEMO_USER_ID,
-            task_id,
-            "monetag",
-            "created",
-            0,
-            f"task_{task_id}",
-            now.isoformat(),
-            expires_at.isoformat(),
+            req.telegram_id,
+            req.task_id,
+            task["title"],
+            task["kind"],
+            float(task["reward"]),
+            int(task["cooldown"]),
+            now().isoformat(),
+            (now() + timedelta(minutes=20)).isoformat(),
         ),
     )
     conn.commit()
     conn.close()
 
-    return StartTaskResponse(session_id=session_id, ad_url=f"/task?sid={session_id}")
-
-
-@app.get("/api/ad/sessions/{session_id}")
-def ad_session(session_id: str) -> dict[str, Any]:
-    conn = db()
-    row = conn.execute(
-        "SELECT * FROM ad_sessions WHERE id = ? AND user_id = ?",
-        (session_id, DEMO_USER_ID),
-    ).fetchone()
-    if not row:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Ad session not found")
-
-    task = task_by_id(int(row["task_id"]))
-    payload = {
-        "session_id": row["id"],
-        "status": row["status"],
-        "credited": bool(row["credited"]),
-        "expires_at": row["expires_at"],
-        "task": {"id": task["id"], "title": task["title"], "reward": task["reward"]},
-        "provider": {
-            "name": "monetag",
-            "enabled": monetag_enabled(),
-            "sdk_src": MONETAG_SDK_SRC,
-            "zone_id": MONETAG_MAIN_ZONE,
-            "show_fn": MONETAG_SHOW_FN or (f"show_{MONETAG_MAIN_ZONE}" if MONETAG_MAIN_ZONE else ""),
-            "ymid": row["ymid"],
-            "request_var": row["request_var"],
-        },
-        "allow_simulate": ALLOW_SIMULATE_VALUED,
+    return {
+        "session_id": sid,
+        "ymid": ymid,
+        "show_fn": show_fn_for_kind(task["kind"]),
+        "sdk_src": MONETAG_SDK_SRC,
+        "allow_simulate": ADS_ALLOW_SIMULATE,
+        "kind": task["kind"],
+        "tier": task["tier"],
     }
-    conn.close()
-    return payload
 
 
-@app.post("/api/ad/sessions/{session_id}/client-done")
-def ad_session_client_done(session_id: str) -> dict[str, Any]:
-    now = utcnow().isoformat()
+def credit(conn: sqlite3.Connection, session_row: sqlite3.Row) -> bool:
+    if int(session_row["credited"]) == 1:
+        return False
+
+    telegram_id = int(session_row["telegram_id"])
+    u = refresh_daily(conn, telegram_id)
+    if int(u["daily_ads"]) >= DAILY_LIMIT:
+        return False
+
+    reward = float(session_row["reward"] or 0)
+    cooldown = int(session_row["cooldown"] or 30)
+    task_id = int(session_row["task_id"])
+    if reward <= 0:
+        return False
+
+    nb = round(float(u["balance"]) + reward, 3)
+    na = int(u["ads_watched"]) + 1
+    nd = int(u["daily_ads"]) + 1
+    nx = now() + timedelta(seconds=cooldown)
+
+    conn.execute("UPDATE users SET balance=?, ads_watched=?, daily_ads=? WHERE telegram_id=?", (nb, na, nd, telegram_id))
+    conn.execute(
+        "INSERT INTO task_runs (telegram_id, task_id, next_available_at) VALUES (?, ?, ?) ON CONFLICT(telegram_id, task_id) DO UPDATE SET next_available_at=excluded.next_available_at",
+        (telegram_id, task_id, nx.isoformat()),
+    )
+    conn.execute("UPDATE ad_sessions SET credited=1, status='verified' WHERE id=?", (session_row["id"],))
+    conn.commit()
+    return True
+
+
+@app.get("/api/ads/status/{session_id}")
+def ad_status(session_id: str):
     conn = db()
-    row = conn.execute(
-        "SELECT * FROM ad_sessions WHERE id = ? AND user_id = ?",
-        (session_id, DEMO_USER_ID),
-    ).fetchone()
-    if not row:
+    s = conn.execute("SELECT * FROM ad_sessions WHERE id = ?", (session_id,)).fetchone()
+    if not s:
         conn.close()
         raise HTTPException(status_code=404, detail="Ad session not found")
-
-    if row["status"] == "created":
-        conn.execute(
-            "UPDATE ad_sessions SET status = 'client_done', completed_at = ? WHERE id = ?",
-            (now, session_id),
-        )
-        conn.commit()
-
-    out = conn.execute("SELECT status, credited FROM ad_sessions WHERE id = ?", (session_id,)).fetchone()
-    conn.close()
-    return {"status": out["status"], "credited": bool(out["credited"]) }
-
-
-@app.get("/api/ad/sessions/{session_id}/status")
-def ad_session_status(session_id: str) -> dict[str, Any]:
-    conn = db()
-    row = conn.execute(
-        "SELECT status, credited FROM ad_sessions WHERE id = ? AND user_id = ?",
-        (session_id, DEMO_USER_ID),
-    ).fetchone()
-    if not row:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Ad session not found")
-
-    user = refresh_daily(conn, DEMO_USER_ID)
-    payload = {
-        "status": row["status"],
-        "credited": bool(row["credited"]),
-        "balance": round(float(user["balance"]), 3),
-        "ads_watched": int(user["ads_watched"]),
-        "daily_ads": int(user["daily_ads"]),
+    u = conn.execute("SELECT balance, ads_watched, daily_ads FROM users WHERE telegram_id=?", (s["telegram_id"],)).fetchone()
+    out = {
+        "credited": bool(s["credited"]),
+        "status": s["status"],
+        "balance": round(float(u["balance"]), 3),
+        "ads_watched": int(u["ads_watched"]),
+        "daily_ads": int(u["daily_ads"]),
         "daily_limit": DAILY_LIMIT,
     }
     conn.close()
-    return payload
+    return out
 
 
-@app.post("/api/ad/sessions/{session_id}/simulate-valued")
-def simulate_valued(session_id: str) -> dict[str, Any]:
-    if not ALLOW_SIMULATE_VALUED:
-        raise HTTPException(status_code=403, detail="Simulation disabled")
-
+@app.post("/api/ads/simulate/{session_id}")
+def simulate(session_id: str):
+    if not ADS_ALLOW_SIMULATE:
+        raise HTTPException(status_code=403, detail="Simulate disabled")
     conn = db()
-    row = conn.execute(
-        "SELECT * FROM ad_sessions WHERE id = ? AND user_id = ?",
-        (session_id, DEMO_USER_ID),
-    ).fetchone()
-    if not row:
+    s = conn.execute("SELECT * FROM ad_sessions WHERE id=?", (session_id,)).fetchone()
+    if not s:
         conn.close()
         raise HTTPException(status_code=404, detail="Ad session not found")
-
-    credited_now = credit_session(conn, row)
-    out = conn.execute("SELECT status, credited FROM ad_sessions WHERE id = ?", (session_id,)).fetchone()
+    credited_now = credit(conn, s)
     conn.close()
-    return {"status": out["status"], "credited": bool(out["credited"]), "credited_now": credited_now}
+    return {"ok": True, "credited_now": credited_now}
 
 
-@app.post("/api/monetag/postback")
 @app.get("/api/monetag/postback")
-async def monetag_postback(request: Request) -> JSONResponse:
-    query = dict(request.query_params)
-    body: dict[str, Any] = {}
-    ctype = request.headers.get("content-type", "")
-
-    if "application/json" in ctype:
+@app.post("/api/monetag/postback")
+async def monetag_postback(request: Request):
+    payload = dict(request.query_params)
+    if "application/json" in request.headers.get("content-type", ""):
         try:
             body = await request.json()
+            payload.update(body)
         except Exception:
-            body = {}
+            pass
 
-    token = query.get("token") or request.headers.get("x-postback-token", "")
+    token = str(payload.get("token") or "")
     if MONETAG_POSTBACK_TOKEN and token != MONETAG_POSTBACK_TOKEN:
-        return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
-    payload = {**query, **body}
-    ymid = str(payload.get("ymid", "")).strip()
-    event_type = str(payload.get("event_type", "")).strip().lower()
-    reward_event_type = str(payload.get("reward_event_type", "")).strip().lower()
+    ymid = str(payload.get("ymid") or "")
+    reward_event = str(payload.get("reward_event_type") or "").lower()
 
     conn = db()
-    conn.execute(
-        """
-        INSERT INTO ad_postbacks (
-          ymid, event_type, reward_event_type, zone_id, sub_zone_id, telegram_id, request_var, payload_json, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            ymid,
-            event_type,
-            reward_event_type,
-            str(payload.get("zone_id", "")),
-            str(payload.get("sub_zone_id", "")),
-            str(payload.get("telegram_id", "")),
-            str(payload.get("request_var", "")),
-            json.dumps(payload),
-            utcnow().isoformat(),
-        ),
-    )
-
     credited_now = False
-    if ymid:
-        session = conn.execute("SELECT * FROM ad_sessions WHERE ymid = ?", (ymid,)).fetchone()
-        if session and reward_event_type == "valued":
-            credited_now = credit_session(conn, session)
-
-    conn.commit()
+    if ymid and reward_event in {"valued", "rewarded", "completed"}:
+        s = conn.execute("SELECT * FROM ad_sessions WHERE ymid = ?", (ymid,)).fetchone()
+        if s:
+            credited_now = credit(conn, s)
     conn.close()
-    return JSONResponse({"ok": True, "credited_now": credited_now})
+    return {"ok": True, "credited_now": credited_now}
 
 
-@app.post("/api/withdraw", response_model=WithdrawResponse)
-def withdraw(req: WithdrawRequest) -> WithdrawResponse:
+@app.post("/api/withdraw")
+def withdraw(req: WithdrawRequest):
     conn = db()
-    user = refresh_daily(conn, DEMO_USER_ID)
-
+    u = refresh_daily(conn, req.telegram_id)
     if req.amount < MIN_WITHDRAW:
         conn.close()
         raise HTTPException(status_code=400, detail=f"Minimum withdrawal is ${MIN_WITHDRAW:.2f}")
-
-    balance = float(user["balance"])
-    if req.amount > balance:
+    if req.amount > float(u["balance"]):
         conn.close()
         raise HTTPException(status_code=400, detail="Insufficient balance")
 
-    new_balance = round(balance - req.amount, 3)
-
-    conn.execute("UPDATE users SET balance = ? WHERE id = ?", (new_balance, DEMO_USER_ID))
+    nb = round(float(u["balance"]) - req.amount, 3)
+    conn.execute("UPDATE users SET balance=? WHERE telegram_id=?", (nb, req.telegram_id))
     conn.execute(
-        """
-        INSERT INTO withdrawals (user_id, method, account, amount, status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-        """,
-        (DEMO_USER_ID, req.method, req.account, req.amount, "pending", utcnow().isoformat()),
+        "INSERT INTO withdrawals (telegram_id, method, account, amount, status, created_at) VALUES (?, ?, ?, ?, 'pending', ?)",
+        (req.telegram_id, req.method, req.account, req.amount, now().isoformat()),
     )
     conn.commit()
     conn.close()
-
-    return WithdrawResponse(ok=True, message="Withdrawal request submitted", balance=new_balance)
+    return {"ok": True, "message": "Withdrawal request submitted", "balance": nb}

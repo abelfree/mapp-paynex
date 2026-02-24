@@ -151,6 +151,7 @@ h1 { margin: 0; font-size: 1.95rem; }
 }
 .task p { margin: 0; padding-left: 12px; }
 .task .title { font-weight: 600; font-size: 1.03rem; }
+.task .meta { color: var(--sub); font-size: 0.82rem; margin-top: 2px; }
 .task .reward { color: var(--green); font-weight: 700; margin-top: 4px; }
 .timer {
   min-width: 95px;

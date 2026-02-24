@@ -6,6 +6,7 @@ if (tg) {
 
 const refs = {
   list: document.getElementById("taskList"),
+  macroList: document.getElementById("macroTaskList"),
   balance: document.getElementById("balance"),
   adsWatched: document.getElementById("adsWatched"),
   todayAds: document.getElementById("todayAds"),
@@ -24,6 +25,8 @@ const state = {
   multipleAccounts: false,
   monetag: null,
   tasks: [],
+  microTasks: [],
+  macroTasks: [],
 };
 
 function getDeviceId() {
@@ -69,20 +72,36 @@ function renderHeader(payload) {
   refs.referrals.textContent = String(payload.referrals || 0);
 }
 
-function renderTasks() {
-  refs.list.innerHTML = "";
-  state.tasks.forEach((task) => {
+function taskMeta(task) {
+  const tier = task.tier === "macro" ? "Macro" : "Micro";
+  const kind = task.kind === "video" ? "Video" : "Web";
+  return `${tier} ${kind} Task`;
+}
+
+function renderTaskList(container, tasks) {
+  container.innerHTML = "";
+  tasks.forEach((task) => {
     const row = document.createElement("article");
     row.className = "task";
     row.innerHTML = `
       <div>
         <p class="title">${task.title}</p>
+        <p class="meta">${taskMeta(task)}</p>
         <p class="reward">Reward: $${Number(task.reward).toFixed(3)}</p>
       </div>
       <button class="timer" data-task-id="${task.id}">${clock(task.remaining_seconds)}</button>
     `;
-    refs.list.appendChild(row);
+    container.appendChild(row);
   });
+}
+
+function renderTasks() {
+  renderTaskList(refs.macroList, state.macroTasks);
+  renderTaskList(refs.list, state.microTasks);
+}
+
+function taskById(taskId) {
+  return state.tasks.find((t) => t.id === taskId);
 }
 
 function tick() {
@@ -91,7 +110,7 @@ function tick() {
   });
   document.querySelectorAll(".timer").forEach((btn) => {
     const id = Number(btn.dataset.taskId);
-    const t = state.tasks.find((x) => x.id === id);
+    const t = taskById(id);
     if (t) btn.textContent = clock(t.remaining_seconds);
   });
 }
@@ -108,6 +127,8 @@ async function loadState() {
   });
   state.multipleAccounts = Boolean(data.multiple_accounts);
   state.tasks = data.tasks || [];
+  state.microTasks = data.micro_tasks || state.tasks.filter((t) => t.tier !== "macro");
+  state.macroTasks = data.macro_tasks || state.tasks.filter((t) => t.tier === "macro");
   state.monetag = data.monetag || null;
   renderHeader(data);
   renderTasks();
@@ -160,7 +181,7 @@ async function doMonetagTask(taskId) {
   }
 }
 
-refs.list.addEventListener("click", async (event) => {
+async function onTaskClick(event) {
   const timer = event.target.closest(".timer");
   if (!timer) return;
 
@@ -170,7 +191,7 @@ refs.list.addEventListener("click", async (event) => {
   }
 
   const taskId = Number(timer.dataset.taskId);
-  const task = state.tasks.find((t) => t.id === taskId);
+  const task = taskById(taskId);
   if (!task) return;
   if (task.remaining_seconds > 0) {
     alert("Task is cooling down.");
@@ -182,7 +203,10 @@ refs.list.addEventListener("click", async (event) => {
   } catch (e) {
     alert(e.message || "Task failed");
   }
-});
+}
+
+refs.list.addEventListener("click", onTaskClick);
+refs.macroList.addEventListener("click", onTaskClick);
 
 refs.withdrawBtn.addEventListener("click", () => {
   if (state.multipleAccounts) {

@@ -46,6 +46,11 @@
     </section>
 
     <section class="card panel">
+      <h4>Daily Macro Tasks</h4>
+      <div id="macroTaskList" class="tasks"></div>
+    </section>
+
+    <section class="card panel">
       <h4>Daily Micro Tasks</h4>
       <div id="taskList" class="tasks"></div>
     </section>
@@ -67,14 +72,14 @@
       </div>
       <p class="hint">Minimum withdrawal is $5.00.</p>
       <form id="withdrawForm" class="form">
-        <select required>
+        <select name="method" required>
           <option value="">Select Payment Method</option>
           <option>USDT (TRC20)</option>
           <option>PayPal</option>
           <option>Bank Transfer</option>
         </select>
-        <input required type="text" placeholder="Enter Account Number" />
-        <input required type="number" step="0.01" min="5" placeholder="Amount in USD" />
+        <input name="account" required type="text" placeholder="Enter Account Number" />
+        <input name="amount" required type="number" step="0.01" min="5" placeholder="Amount in USD" />
         <button class="submit" type="submit">Submit Request</button>
       </form>
     </section>
