@@ -4,6 +4,13 @@ if (tg) {
   tg.expand();
 }
 
+const API_BASE = (() => {
+  const p = new URLSearchParams(window.location.search);
+  const raw = (p.get("api") || "").trim();
+  if (!raw) return "";
+  return raw.replace(/\/+$/, "");
+})();
+
 const refs = {
   list: document.getElementById("taskList"),
   macroList: document.getElementById("macroTaskList"),
@@ -54,7 +61,8 @@ function clock(totalSeconds) {
 }
 
 async function api(path, options = {}) {
-  const res = await fetch(path, {
+  const url = path.startsWith("/") ? `${API_BASE}${path}` : `${API_BASE}/${path}`;
+  const res = await fetch(url, {
     headers: { "Content-Type": "application/json" },
     ...options,
   });
