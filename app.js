@@ -27,6 +27,7 @@ const state = {
   tasks: [],
   microTasks: [],
   macroTasks: [],
+  inAppStarted: false,
 };
 
 function getDeviceId() {
@@ -163,16 +164,24 @@ async function doMonetagTask(taskId) {
     throw new Error(`Monetag function not found: ${start.show_fn}`);
   }
 
-  let invoked = false;
-  try {
-    const out = fn({ ymid: start.ymid, requestVar: `task_${taskId}` });
-    invoked = true;
-    await Promise.resolve(out);
-  } catch (_) {
-    // Some Monetag formats expose show_<zone>() with no arguments.
-  }
-  if (!invoked) {
-    await Promise.resolve(fn());
+  if (start.kind === "video") {
+    try {
+      await Promise.resolve(fn("pop"));
+    } catch (_) {
+      await Promise.resolve(fn());
+    }
+  } else {
+    let invoked = false;
+    try {
+      const out = fn({ ymid: start.ymid, requestVar: `task_${taskId}` });
+      invoked = true;
+      await Promise.resolve(out);
+    } catch (_) {
+      // Some Monetag formats expose show_<zone>() with no arguments.
+    }
+    if (!invoked) {
+      await Promise.resolve(fn());
+    }
   }
 
   if (start.allow_simulate) {
@@ -188,6 +197,37 @@ async function doMonetagTask(taskId) {
       return;
     }
     await new Promise((r) => setTimeout(r, 1500));
+  }
+}
+
+async function startInAppInterstitial() {
+  if (state.inAppStarted || !state.monetag?.sdk_src || !state.monetag?.show_fn) return;
+  state.inAppStarted = true;
+  try {
+    if (!window[state.monetag.show_fn]) {
+      await new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = state.monetag.sdk_src;
+        script.async = true;
+        script.onload = () => resolve(true);
+        script.onerror = () => reject(new Error("Monetag SDK failed to load"));
+        document.head.appendChild(script);
+      });
+    }
+    const fn = window[state.monetag.show_fn];
+    if (typeof fn !== "function") return;
+    fn({
+      type: "inApp",
+      inAppSettings: {
+        frequency: 2,
+        capping: 0.1,
+        interval: 30,
+        timeout: 5,
+        everyPage: false,
+      },
+    });
+  } catch (_) {
+    // Ignore non-reward ad boot errors.
   }
 }
 
@@ -266,6 +306,7 @@ async function boot() {
   state.username = u.name;
   state.deviceId = getDeviceId();
   await loadState();
+  await startInAppInterstitial();
   setInterval(tick, 1000);
 }
 
