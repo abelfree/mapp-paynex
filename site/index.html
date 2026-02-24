@@ -3,102 +3,84 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>PayneX UI Clone</title>
+  <title>PayneX</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
-  <div class="phone-shell">
+  <main class="phone">
     <header class="topbar">
-      <button class="icon-btn" aria-label="Close">X</button>
+      <button class="circle">X</button>
       <h1>PayneX</h1>
-      <button class="icon-btn" aria-label="Menu">...</button>
+      <button class="circle">...</button>
     </header>
 
-    <main class="screen" id="appScreen">
-      <section class="welcome-row card-lite">
-        <div class="avatar">A</div>
-        <div class="welcome-copy">
-          <h2>Welcome Back!</h2>
-          <p id="welcomeSub">abel</p>
-        </div>
-        <button class="history" aria-label="History">R</button>
-      </section>
+    <section class="welcome card">
+      <div class="avatar">A</div>
+      <div>
+        <h2>Welcome Back!</h2>
+        <p id="username">abel</p>
+      </div>
+      <button class="history">R</button>
+    </section>
 
-      <section class="balance-card">
-        <p>Your Total Balance</p>
-        <h3 id="balanceText">$0.000</h3>
-      </section>
+    <section class="balance">
+      <p>Your Total Balance</p>
+      <h3 id="balance">$1.900</h3>
+    </section>
 
-      <section class="stats-grid">
-        <article class="stat card-lite">
-          <h4 id="adsWatched">0</h4>
-          <p>Ads Watched</p>
-        </article>
-        <article class="stat card-lite">
-          <h4 id="todayAds">0 / 15</h4>
-          <p>Today's Ads</p>
-        </article>
-        <article class="stat card-lite">
-          <h4 id="referrals">0</h4>
-          <p>Referrals</p>
-        </article>
-      </section>
+    <section class="stats">
+      <article class="card stat"><h4 id="adsWatched">10</h4><p>Ads Watched</p></article>
+      <article class="card stat"><h4 id="todayAds">10 / 10</h4><p>Today's Ads</p></article>
+      <article class="card stat"><h4 id="referrals">0</h4><p>Referrals</p></article>
+    </section>
 
-      <section class="section card-lite">
-        <h4 class="section-title">Quick Actions</h4>
-        <div class="quick-actions">
-          <button class="qa-btn muted">Play<span>Limit Reached</span></button>
-          <button class="qa-btn outline" id="withdrawBtn">Wallet<span>Withdraw</span></button>
-        </div>
-      </section>
+    <section class="card panel">
+      <h4>Quick Actions</h4>
+      <div class="actions">
+        <button class="action muted" disabled><span>Play</span><small>Limit Reached</small></button>
+        <button class="action" id="withdrawBtn"><span>Wallet</span><small>Withdraw</small></button>
+      </div>
+    </section>
 
-      <section class="section card-lite">
-        <h4 class="section-title">Daily Micro Tasks</h4>
-        <div id="taskList" class="task-list"></div>
-      </section>
+    <section class="card panel">
+      <h4>Daily Micro Tasks</h4>
+      <div id="taskList" class="tasks"></div>
+    </section>
 
-      <section class="section card-lite">
-        <h4 class="section-title">More Options</h4>
-        <div class="quick-actions">
-          <button class="qa-btn outline">Invite<span>Invite</span></button>
-          <button class="qa-btn outline">Support<span>Support</span></button>
-        </div>
-      </section>
-    </main>
-  </div>
+    <section class="card panel">
+      <h4>More Options</h4>
+      <div class="actions">
+        <button class="action"><span>Invite</span></button>
+        <button class="action"><span>Support</span></button>
+      </div>
+    </section>
+  </main>
 
   <div class="overlay" id="withdrawOverlay" hidden>
-    <div class="modal">
-      <div class="modal-head">
+    <section class="modal">
+      <div class="modalHead">
         <h5>Withdraw Funds</h5>
-        <button class="icon-btn" id="closeWithdraw" aria-label="Close">X</button>
+        <button id="closeWithdraw" class="circle">X</button>
       </div>
       <p class="hint">Minimum withdrawal is $5.00.</p>
-      <form class="withdraw-form" id="withdrawForm">
-        <select name="method" required>
+      <form id="withdrawForm" class="form">
+        <select required>
           <option value="">Select Payment Method</option>
-          <option value="USDT (TRC20)">USDT (TRC20)</option>
-          <option value="PayPal">PayPal</option>
-          <option value="Bank Transfer">Bank Transfer</option>
+          <option>USDT (TRC20)</option>
+          <option>PayPal</option>
+          <option>Bank Transfer</option>
         </select>
-        <input name="account" type="text" placeholder="Enter Account Number" required />
-        <input name="amount" type="number" step="0.01" placeholder="Amount in USD" required />
-        <button type="submit" class="submit-btn">Submit Request</button>
+        <input required type="text" placeholder="Enter Account Number" />
+        <input required type="number" step="0.01" min="5" placeholder="Amount in USD" />
+        <button class="submit" type="submit">Submit Request</button>
       </form>
-    </div>
-  </div>
-
-  <div class="overlay" id="warningOverlay" hidden>
-    <div class="warning-card">
-      <h5>Warning</h5>
-      <p>Multiple accounts are not allowed. Please use your original account to continue.</p>
-      <button id="dismissWarning" class="submit-btn">Okay</button>
-    </div>
+    </section>
   </div>
 
   <script src="./app.js"></script>
 </body>
 </html>
+

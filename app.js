@@ -1,206 +1,237 @@
-const state = {
-  me: null,
-  tasks: [],
-  refreshHandle: null,
-};
-
 const tg = window.Telegram?.WebApp;
-const deviceStorageKey = "paynex_device_id";
+if (tg) {
+  tg.ready();
+  tg.expand();
+}
 
-const els = {
-  welcomeSub: document.getElementById("welcomeSub"),
-  balanceText: document.getElementById("balanceText"),
+const refs = {
+  list: document.getElementById("taskList"),
+  balance: document.getElementById("balance"),
   adsWatched: document.getElementById("adsWatched"),
   todayAds: document.getElementById("todayAds"),
   referrals: document.getElementById("referrals"),
-  taskList: document.getElementById("taskList"),
-  withdrawBtn: document.getElementById("withdrawBtn"),
+  username: document.getElementById("username"),
   withdrawOverlay: document.getElementById("withdrawOverlay"),
+  withdrawBtn: document.getElementById("withdrawBtn"),
   closeWithdraw: document.getElementById("closeWithdraw"),
   withdrawForm: document.getElementById("withdrawForm"),
-  warningOverlay: document.getElementById("warningOverlay"),
-  dismissWarning: document.getElementById("dismissWarning"),
 };
 
-function usd(value) {
-  return `$${Number(value).toFixed(3)}`;
-}
+const state = {
+  telegramId: 0,
+  username: "user",
+  deviceId: "",
+  multipleAccounts: false,
+  monetag: null,
+  tasks: [],
+};
 
 function getDeviceId() {
-  let id = window.localStorage.getItem(deviceStorageKey);
-  if (id) return id;
-  id = `dev_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
-  window.localStorage.setItem(deviceStorageKey, id);
-  return id;
+  const key = "paynex_device_id_v1";
+  let v = window.localStorage.getItem(key);
+  if (v) return v;
+  v = `dev_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+  window.localStorage.setItem(key, v);
+  return v;
 }
 
-function getTelegramId() {
-  const fromTelegram = Number(tg?.initDataUnsafe?.user?.id || 0);
-  if (fromTelegram > 0) return fromTelegram;
-  return 1;
+function getTelegramUser() {
+  const id = Number(tg?.initDataUnsafe?.user?.id || 0);
+  const first = tg?.initDataUnsafe?.user?.first_name || "abel";
+  return { id: id > 0 ? id : 1, name: first };
 }
 
-function toClock(seconds) {
-  const h = Math.floor(seconds / 3600)
-    .toString()
-    .padStart(2, "0");
-  const m = Math.floor((seconds % 3600) / 60)
-    .toString()
-    .padStart(2, "0");
-  const s = Math.floor(seconds % 60)
-    .toString()
-    .padStart(2, "0");
-  return `${h}:${m}:${s}`;
+function clock(totalSeconds) {
+  const s = Math.max(0, totalSeconds);
+  const hh = String(Math.floor(s / 3600)).padStart(2, "0");
+  const mm = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
+  const ss = String(s % 60).padStart(2, "0");
+  return `${hh}:${mm}:${ss}`;
 }
 
-async function api(url, options = {}) {
-  const res = await fetch(url, {
+async function api(path, options = {}) {
+  const res = await fetch(path, {
     headers: { "Content-Type": "application/json" },
     ...options,
   });
-
   if (!res.ok) {
-    const error = await res.json().catch(() => ({}));
-    throw new Error(error.detail || "Request failed");
+    const e = await res.json().catch(() => ({}));
+    throw new Error(e.detail || "Request failed");
   }
-
   return res.json();
 }
 
-function renderMe() {
-  if (!state.me) return;
-  els.welcomeSub.textContent = state.me.username;
-  els.balanceText.textContent = usd(state.me.balance);
-  els.adsWatched.textContent = `${state.me.ads_watched}`;
-  els.todayAds.textContent = `${state.me.daily_ads} / ${state.me.daily_limit}`;
-  els.referrals.textContent = `${state.me.referrals}`;
-}
-
-function taskItem(task) {
-  const ready = task.remaining_seconds === 0;
-  const inProgress = Boolean(task.active_session_id);
-  const buttonText = inProgress ? "Continue" : ready ? "Start" : "Wait";
-  const disabled = !ready && !inProgress;
-
-  return `
-    <article class="task" data-id="${task.id}">
-      <div>
-        <p class="task-title">${task.title}</p>
-        <p class="reward">Reward: ${usd(task.reward)}</p>
-      </div>
-      <div class="task-right">
-        <div class="timer">${inProgress ? "In Progress" : ready ? "Ready" : toClock(task.remaining_seconds)}</div>
-        <button class="claim-btn" data-start ${disabled ? "disabled" : ""}>${buttonText}</button>
-      </div>
-    </article>
-  `;
+function renderHeader(payload) {
+  refs.username.textContent = payload.username;
+  refs.balance.textContent = `$${Number(payload.balance).toFixed(3)}`;
+  refs.adsWatched.textContent = String(payload.ads_watched);
+  refs.todayAds.textContent = `${payload.daily_ads} / ${payload.daily_limit}`;
+  refs.referrals.textContent = String(payload.referrals || 0);
 }
 
 function renderTasks() {
-  els.taskList.innerHTML = state.tasks.map(taskItem).join("");
+  refs.list.innerHTML = "";
+  state.tasks.forEach((task) => {
+    const row = document.createElement("article");
+    row.className = "task";
+    row.innerHTML = `
+      <div>
+        <p class="title">${task.title}</p>
+        <p class="reward">Reward: $${Number(task.reward).toFixed(3)}</p>
+      </div>
+      <button class="timer" data-task-id="${task.id}">${clock(task.remaining_seconds)}</button>
+    `;
+    refs.list.appendChild(row);
+  });
 }
 
-function stepCooldowns() {
-  let changed = false;
-  for (const task of state.tasks) {
-    if (task.remaining_seconds > 0 && !task.active_session_id) {
-      task.remaining_seconds -= 1;
-      changed = true;
-    }
-  }
-  if (changed) renderTasks();
+function tick() {
+  state.tasks.forEach((t) => {
+    if (t.remaining_seconds > 0) t.remaining_seconds -= 1;
+  });
+  document.querySelectorAll(".timer").forEach((btn) => {
+    const id = Number(btn.dataset.taskId);
+    const t = state.tasks.find((x) => x.id === id);
+    if (t) btn.textContent = clock(t.remaining_seconds);
+  });
 }
 
-async function refreshAll() {
-  const [me, tasks] = await Promise.all([api("/api/me"), api("/api/tasks")]);
-  state.me = me;
-  state.tasks = tasks;
-  renderMe();
+async function loadState() {
+  const payload = {
+    telegram_id: state.telegramId,
+    username: state.username,
+    device_id: state.deviceId,
+  };
+  const data = await api("/api/state", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  state.multipleAccounts = Boolean(data.multiple_accounts);
+  state.tasks = data.tasks || [];
+  state.monetag = data.monetag || null;
+  renderHeader(data);
   renderTasks();
 }
 
-async function checkMultipleAccounts() {
-  try {
-    const payload = {
-      telegram_id: getTelegramId(),
-      device_id: getDeviceId(),
-    };
-    const res = await api("/api/account/check", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
-    els.warningOverlay.hidden = !res.multiple_accounts;
-  } catch {
-    els.warningOverlay.hidden = true;
+async function doMonetagTask(taskId) {
+  const start = await api("/api/ads/start", {
+    method: "POST",
+    body: JSON.stringify({ telegram_id: state.telegramId, task_id: taskId }),
+  });
+
+  if (!start.sdk_src || !start.show_fn) {
+    if (start.allow_simulate) {
+      await api(`/api/ads/simulate/${start.session_id}`, { method: "POST" });
+      await loadState();
+      return;
+    }
+    throw new Error("Monetag is not configured");
+  }
+
+  await new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = start.sdk_src;
+    script.async = true;
+    script.onload = () => resolve(true);
+    script.onerror = () => reject(new Error("Monetag SDK failed to load"));
+    document.head.appendChild(script);
+  });
+
+  const fn = window[start.show_fn];
+  if (typeof fn !== "function") {
+    throw new Error(`Monetag function not found: ${start.show_fn}`);
+  }
+
+  await fn({ ymid: start.ymid, requestVar: `task_${taskId}` });
+
+  if (start.allow_simulate) {
+    await api(`/api/ads/simulate/${start.session_id}`, { method: "POST" });
+  }
+
+  let tries = 0;
+  while (tries < 20) {
+    tries += 1;
+    const status = await api(`/api/ads/status/${start.session_id}`);
+    if (status.credited) {
+      await loadState();
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 1500));
   }
 }
 
-async function startTask(taskId) {
+refs.list.addEventListener("click", async (event) => {
+  const timer = event.target.closest(".timer");
+  if (!timer) return;
+
+  if (state.multipleAccounts) {
+    alert("Multiple accounts are not allowed. Please use your original account.");
+    return;
+  }
+
+  const taskId = Number(timer.dataset.taskId);
+  const task = state.tasks.find((t) => t.id === taskId);
+  if (!task) return;
+  if (task.remaining_seconds > 0) {
+    alert("Task is cooling down.");
+    return;
+  }
+
   try {
-    const data = await api(`/api/tasks/${taskId}/start`, { method: "POST" });
-    window.location.assign(data.ad_url);
-  } catch (error) {
-    alert(error.message);
-  }
-}
-
-els.taskList.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-start]");
-  if (!button) return;
-
-  const card = button.closest("[data-id]");
-  if (!card) return;
-  const taskId = Number(card.dataset.id);
-  if (Number.isNaN(taskId)) return;
-  startTask(taskId);
-});
-
-els.withdrawBtn.addEventListener("click", () => {
-  els.warningOverlay.hidden = true;
-  els.withdrawOverlay.hidden = false;
-});
-
-els.closeWithdraw.addEventListener("click", () => {
-  els.withdrawOverlay.hidden = true;
-});
-
-els.withdrawOverlay.addEventListener("click", (event) => {
-  if (event.target === els.withdrawOverlay) {
-    els.withdrawOverlay.hidden = true;
+    await doMonetagTask(taskId);
+  } catch (e) {
+    alert(e.message || "Task failed");
   }
 });
 
-els.withdrawForm.addEventListener("submit", async (event) => {
+refs.withdrawBtn.addEventListener("click", () => {
+  if (state.multipleAccounts) {
+    alert("Multiple accounts are not allowed. Please use your original account.");
+    refs.withdrawOverlay.hidden = true;
+    return;
+  }
+  refs.withdrawOverlay.hidden = false;
+});
+
+refs.closeWithdraw.addEventListener("click", () => {
+  refs.withdrawOverlay.hidden = true;
+});
+
+refs.withdrawOverlay.addEventListener("click", (event) => {
+  if (event.target === refs.withdrawOverlay) refs.withdrawOverlay.hidden = true;
+});
+
+refs.withdrawForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const formData = new FormData(els.withdrawForm);
+  const formData = new FormData(refs.withdrawForm);
   const payload = {
-    method: formData.get("method"),
-    account: formData.get("account"),
-    amount: Number(formData.get("amount")),
+    telegram_id: state.telegramId,
+    method: formData.get("method") || "",
+    account: formData.get("account") || "",
+    amount: Number(formData.get("amount") || 0),
   };
 
   try {
-    const data = await api("/api/withdraw", {
+    const out = await api("/api/withdraw", {
       method: "POST",
       body: JSON.stringify(payload),
     });
-    state.me.balance = data.balance;
-    renderMe();
-    els.withdrawOverlay.hidden = true;
-    els.withdrawForm.reset();
-    alert(data.message);
-  } catch (error) {
-    alert(error.message);
+    refs.balance.textContent = `$${Number(out.balance).toFixed(3)}`;
+    refs.withdrawOverlay.hidden = true;
+    refs.withdrawForm.reset();
+    alert(out.message);
+  } catch (e) {
+    alert(e.message || "Withdraw failed");
   }
 });
 
-els.dismissWarning.addEventListener("click", () => {
-  els.warningOverlay.hidden = true;
-});
+async function boot() {
+  const u = getTelegramUser();
+  state.telegramId = u.id;
+  state.username = u.name;
+  state.deviceId = getDeviceId();
+  await loadState();
+  setInterval(tick, 1000);
+}
 
-refreshAll().catch((error) => {
-  alert(`Failed to load app: ${error.message}`);
-});
-checkMultipleAccounts();
-
-state.refreshHandle = setInterval(stepCooldowns, 1000);
+boot().catch((e) => alert(e.message || "Failed to load app"));
