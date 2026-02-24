@@ -12,6 +12,8 @@ const API_BASE = (() => {
   if (host === "localhost" || host === "127.0.0.1") return "";
   return "https://mapp-paynex.onrender.com";
 })();
+const DEFAULT_MONETAG_SDK_SRC = "https://libtl.com/sdk.js";
+const DEFAULT_MONETAG_SHOW_FN = "show_10648187";
 
 const refs = {
   list: document.getElementById("taskList"),
@@ -178,28 +180,21 @@ async function doMonetagTask(taskId) {
     method: "POST",
     body: JSON.stringify({ telegram_id: state.telegramId, task_id: taskId }),
   });
-
-  if (!start.sdk_src || !start.show_fn) {
-    if (start.allow_simulate) {
-      await api(`/api/ads/simulate/${start.session_id}`, { method: "POST" });
-      await loadState();
-      return;
-    }
-    throw new Error("Monetag is not configured");
-  }
+  const sdkSrc = start.sdk_src || state.monetag?.sdk_src || DEFAULT_MONETAG_SDK_SRC;
+  const showFn = start.show_fn || state.monetag?.show_fn || DEFAULT_MONETAG_SHOW_FN;
 
   await new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = start.sdk_src;
+    script.src = sdkSrc;
     script.async = true;
     script.onload = () => resolve(true);
     script.onerror = () => reject(new Error("Monetag SDK failed to load"));
     document.head.appendChild(script);
   });
 
-  const fn = window[start.show_fn];
+  const fn = window[showFn];
   if (typeof fn !== "function") {
-    throw new Error(`Monetag function not found: ${start.show_fn}`);
+    throw new Error(`Monetag function not found: ${showFn}`);
   }
 
   let invoked = false;
@@ -243,9 +238,8 @@ async function playInAppInterstitial() {
   state.playLimit = Number(start.play_limit || state.playLimit);
   renderPlayButton();
 
-  const showFn = start.show_fn || state.monetag?.show_fn;
-  const sdkSrc = start.sdk_src || state.monetag?.sdk_src;
-  if (!showFn || !sdkSrc) throw new Error("Monetag is not configured");
+  const showFn = start.show_fn || state.monetag?.show_fn || DEFAULT_MONETAG_SHOW_FN;
+  const sdkSrc = start.sdk_src || state.monetag?.sdk_src || DEFAULT_MONETAG_SDK_SRC;
 
   if (!window[showFn]) {
     await new Promise((resolve, reject) => {
