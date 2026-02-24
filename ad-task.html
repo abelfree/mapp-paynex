@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Task Ad Runner</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="ad-shell">
+    <section class="ad-card card-lite">
+      <h1 id="adTitle">Task</h1>
+      <p class="ad-sub" id="adReward">Reward: $0.000</p>
+      <p class="ad-sub" id="adStatus">Preparing ad session...</p>
+
+      <div class="ad-actions">
+        <button id="showAdBtn" class="submit-btn" disabled>Show Ad</button>
+        <button id="checkStatusBtn" class="qa-btn outline">Check Reward</button>
+        <button id="simulateBtn" class="qa-btn muted" hidden>Simulate Valued</button>
+      </div>
+
+      <p class="ad-hint">
+        Reward is credited only after backend verification from provider postback.
+      </p>
+
+      <a href="/" class="back-link">Back to dashboard</a>
+    </section>
+  </main>
+
+  <script src="/static/ad-task.js"></script>
+</body>
+</html>

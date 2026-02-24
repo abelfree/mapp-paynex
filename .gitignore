@@ -1,0 +1,16 @@
+# runtime
+__pycache__/
+*.pyc
+
+# local data
+mapp.db
+.env
+
+# logs
+*.log
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
