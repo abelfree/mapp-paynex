@@ -27,7 +27,7 @@ const state = {
 };
 
 function getDeviceId() {
-  const key = "paynex_device_id_v1";
+  const key = "momoney_device_id_v1";
   let v = window.localStorage.getItem(key);
   if (v) return v;
   v = `dev_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;

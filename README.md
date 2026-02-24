@@ -1,4 +1,4 @@
-# PayneX Mini App
+# momoney Mini App
 
 Standalone Telegram-style mini app clone with task flow, withdraw modal, and Monetag-ready backend hooks.
 
