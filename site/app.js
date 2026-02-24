@@ -11,8 +11,8 @@ const tasks = [
 const taskList = document.getElementById('taskList');
 const withdrawOverlay = document.getElementById('withdrawOverlay');
 const warningOverlay = document.getElementById('warningOverlay');
-const warningSeenKey = 'paynex_warning_seen';
-const accountKey = 'paynex_seen_accounts';
+const warningSeenKey = 'paynex_warning_seen_v2';
+const accountKey = 'paynex_seen_accounts_v2';
 const tg = window.Telegram?.WebApp;
 
 function closeWarning() {
