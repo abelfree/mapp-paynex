@@ -163,7 +163,17 @@ async function doMonetagTask(taskId) {
     throw new Error(`Monetag function not found: ${start.show_fn}`);
   }
 
-  await fn({ ymid: start.ymid, requestVar: `task_${taskId}` });
+  let invoked = false;
+  try {
+    const out = fn({ ymid: start.ymid, requestVar: `task_${taskId}` });
+    invoked = true;
+    await Promise.resolve(out);
+  } catch (_) {
+    // Some Monetag formats expose show_<zone>() with no arguments.
+  }
+  if (!invoked) {
+    await Promise.resolve(fn());
+  }
 
   if (start.allow_simulate) {
     await api(`/api/ads/simulate/${start.session_id}`, { method: "POST" });
