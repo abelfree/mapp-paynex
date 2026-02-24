@@ -16,6 +16,8 @@ const API_BASE = (() => {
 const refs = {
   list: document.getElementById("taskList"),
   macroList: document.getElementById("macroTaskList"),
+  playBtn: document.getElementById("playBtn"),
+  playStatus: document.getElementById("playStatus"),
   balance: document.getElementById("balance"),
   adsWatched: document.getElementById("adsWatched"),
   todayAds: document.getElementById("todayAds"),
@@ -36,7 +38,8 @@ const state = {
   tasks: [],
   microTasks: [],
   macroTasks: [],
-  inAppStarted: false,
+  playDaily: 0,
+  playLimit: 5,
 };
 
 function getDeviceId() {
@@ -81,6 +84,16 @@ function renderHeader(payload) {
   refs.adsWatched.textContent = String(payload.ads_watched);
   refs.todayAds.textContent = `${payload.daily_ads} / ${payload.daily_limit}`;
   refs.referrals.textContent = String(payload.referrals || 0);
+  state.playDaily = Number(payload.play_daily || 0);
+  state.playLimit = Number(payload.play_limit || 5);
+  renderPlayButton();
+}
+
+function renderPlayButton() {
+  const reached = state.playDaily >= state.playLimit;
+  refs.playBtn.disabled = reached;
+  refs.playBtn.classList.toggle("muted", reached);
+  refs.playStatus.textContent = reached ? "Limit Reached" : `${state.playDaily} / ${state.playLimit} Played`;
 }
 
 function taskMeta(task) {
@@ -217,35 +230,48 @@ async function doMonetagTask(taskId) {
   }
 }
 
-async function startInAppInterstitial() {
-  if (state.inAppStarted || !state.monetag?.sdk_src || !state.monetag?.show_fn) return;
-  state.inAppStarted = true;
-  try {
-    if (!window[state.monetag.show_fn]) {
-      await new Promise((resolve, reject) => {
-        const script = document.createElement("script");
-        script.src = state.monetag.sdk_src;
-        script.async = true;
-        script.onload = () => resolve(true);
-        script.onerror = () => reject(new Error("Monetag SDK failed to load"));
-        document.head.appendChild(script);
-      });
-    }
-    const fn = window[state.monetag.show_fn];
-    if (typeof fn !== "function") return;
+async function playInAppInterstitial() {
+  if (state.playDaily >= state.playLimit) {
+    renderPlayButton();
+    return;
+  }
+  const start = await api("/api/play/start", {
+    method: "POST",
+    body: JSON.stringify({ telegram_id: state.telegramId }),
+  });
+  state.playDaily = Number(start.play_daily || state.playDaily);
+  state.playLimit = Number(start.play_limit || state.playLimit);
+  renderPlayButton();
+
+  const showFn = start.show_fn || state.monetag?.show_fn;
+  const sdkSrc = start.sdk_src || state.monetag?.sdk_src;
+  if (!showFn || !sdkSrc) throw new Error("Monetag is not configured");
+
+  if (!window[showFn]) {
+    await new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = sdkSrc;
+      script.async = true;
+      script.onload = () => resolve(true);
+      script.onerror = () => reject(new Error("Monetag SDK failed to load"));
+      document.head.appendChild(script);
+    });
+  }
+  const fn = window[showFn];
+  if (typeof fn !== "function") throw new Error(`Monetag function not found: ${showFn}`);
+
+  await Promise.resolve(
     fn({
       type: "inApp",
       inAppSettings: {
-        frequency: 2,
+        frequency: 1,
         capping: 0.1,
-        interval: 30,
-        timeout: 5,
+        interval: 0,
+        timeout: 0,
         everyPage: false,
       },
-    });
-  } catch (_) {
-    // Ignore non-reward ad boot errors.
-  }
+    })
+  );
 }
 
 async function onTaskClick(event) {
@@ -274,6 +300,17 @@ async function onTaskClick(event) {
 
 refs.list.addEventListener("click", onTaskClick);
 refs.macroList.addEventListener("click", onTaskClick);
+refs.playBtn.addEventListener("click", async () => {
+  if (state.multipleAccounts) {
+    alert("Multiple accounts are not allowed. Please use your original account.");
+    return;
+  }
+  try {
+    await playInAppInterstitial();
+  } catch (e) {
+    alert(e.message || "Play failed");
+  }
+});
 
 refs.withdrawBtn.addEventListener("click", () => {
   if (state.multipleAccounts) {
@@ -323,7 +360,6 @@ async function boot() {
   state.username = u.name;
   state.deviceId = getDeviceId();
   await loadState();
-  await startInAppInterstitial();
   setInterval(tick, 1000);
 }
 

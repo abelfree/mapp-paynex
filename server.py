@@ -25,6 +25,7 @@ MONETAG_POSTBACK_TOKEN = os.getenv("MONETAG_POSTBACK_TOKEN", "").strip()
 ADS_ALLOW_SIMULATE = os.getenv("ADS_ALLOW_SIMULATE", "true").lower() == "true"
 
 DAILY_LIMIT = int(os.getenv("DAILY_LIMIT", "10"))
+PLAY_DAILY_LIMIT = int(os.getenv("PLAY_DAILY_LIMIT", "5"))
 MIN_WITHDRAW = float(os.getenv("MIN_WITHDRAW", "5.0"))
 _macro_count = int(os.getenv("MONETAG_MACRO_TASKS_PER_DAY", "4"))
 MONETAG_MACRO_TASKS_PER_DAY = max(1, min(_macro_count, 8))
@@ -56,6 +57,10 @@ class StateRequest(BaseModel):
 class StartAdRequest(BaseModel):
     telegram_id: int = Field(gt=0)
     task_id: int = Field(gt=0)
+
+
+class PlayStartRequest(BaseModel):
+    telegram_id: int = Field(gt=0)
 
 
 class WithdrawRequest(BaseModel):
@@ -95,6 +100,10 @@ def db() -> sqlite3.Connection:
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
+    user_cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
+    if "play_daily" not in user_cols:
+        conn.execute("ALTER TABLE users ADD COLUMN play_daily INTEGER NOT NULL DEFAULT 0")
+
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(ad_sessions)").fetchall()}
     if "task_title" not in cols:
         conn.execute("ALTER TABLE ad_sessions ADD COLUMN task_title TEXT")
@@ -116,6 +125,7 @@ def init_db() -> None:
             balance REAL NOT NULL DEFAULT 0,
             ads_watched INTEGER NOT NULL DEFAULT 0,
             daily_ads INTEGER NOT NULL DEFAULT 0,
+            play_daily INTEGER NOT NULL DEFAULT 0,
             daily_stamp TEXT NOT NULL
         );
 
@@ -193,8 +203,8 @@ def ensure_user(conn: sqlite3.Connection, telegram_id: int, username: str, task_
     row = conn.execute("SELECT * FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
     if not row:
         conn.execute(
-            "INSERT INTO users (telegram_id, username, balance, ads_watched, daily_ads, daily_stamp) VALUES (?, ?, ?, ?, ?, ?)",
-            (telegram_id, username, 0, 0, 0, today_str()),
+            "INSERT INTO users (telegram_id, username, balance, ads_watched, daily_ads, play_daily, daily_stamp) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (telegram_id, username, 0, 0, 0, 0, today_str()),
         )
         row = conn.execute("SELECT * FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
     ensure_task_rows(conn, telegram_id, task_map)
@@ -207,7 +217,10 @@ def refresh_daily(conn: sqlite3.Connection, telegram_id: int) -> sqlite3.Row:
     if not row:
         raise HTTPException(status_code=404, detail="User not found")
     if row["daily_stamp"] != today_str():
-        conn.execute("UPDATE users SET daily_ads = 0, daily_stamp = ? WHERE telegram_id = ?", (today_str(), telegram_id))
+        conn.execute(
+            "UPDATE users SET daily_ads = 0, play_daily = 0, daily_stamp = ? WHERE telegram_id = ?",
+            (today_str(), telegram_id),
+        )
         conn.commit()
         row = conn.execute("SELECT * FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
     return row
@@ -274,6 +287,8 @@ def state(req: StateRequest):
         "ads_watched": int(u["ads_watched"]),
         "daily_ads": int(u["daily_ads"]),
         "daily_limit": DAILY_LIMIT,
+        "play_daily": int(u["play_daily"]),
+        "play_limit": PLAY_DAILY_LIMIT,
         "referrals": 0,
         "multiple_accounts": int(c["c"]) > 1,
         "tasks": all_tasks,
@@ -345,6 +360,32 @@ def start_ad(req: StartAdRequest):
         "allow_simulate": ADS_ALLOW_SIMULATE,
         "kind": task["kind"],
         "tier": task["tier"],
+    }
+
+
+@app.post("/api/play/start")
+def play_start(req: PlayStartRequest):
+    conn = db()
+    task_map = build_task_map(req.telegram_id)
+    ensure_user(conn, req.telegram_id, "user", task_map)
+    u = refresh_daily(conn, req.telegram_id)
+
+    played = int(u["play_daily"])
+    if played >= PLAY_DAILY_LIMIT:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Play limit reached")
+
+    next_played = played + 1
+    conn.execute("UPDATE users SET play_daily=? WHERE telegram_id=?", (next_played, req.telegram_id))
+    conn.commit()
+    conn.close()
+
+    return {
+        "ok": True,
+        "play_daily": next_played,
+        "play_limit": PLAY_DAILY_LIMIT,
+        "show_fn": show_fn_for_kind("web"),
+        "sdk_src": MONETAG_SDK_SRC,
     }
 
 
