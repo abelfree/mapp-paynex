@@ -137,9 +137,24 @@ async function loadState() {
     body: JSON.stringify(payload),
   });
   state.multipleAccounts = Boolean(data.multiple_accounts);
-  state.tasks = data.tasks || [];
-  state.microTasks = data.micro_tasks || state.tasks.filter((t) => t.tier !== "macro");
-  state.macroTasks = data.macro_tasks || state.tasks.filter((t) => t.tier === "macro");
+  const all = Array.isArray(data.tasks) ? data.tasks : [];
+  const byId = new Map();
+  all.forEach((t) => byId.set(Number(t.id), t));
+
+  const macroFromApi = Array.isArray(data.macro_tasks) ? data.macro_tasks : [];
+  const microFromApi = Array.isArray(data.micro_tasks) ? data.micro_tasks : [];
+
+  const macros = macroFromApi.length > 0 ? macroFromApi : all.filter((t) => t.tier === "macro");
+  const micro = microFromApi.length > 0 ? microFromApi : all.filter((t) => t.tier !== "macro");
+
+  state.macroTasks = macros.filter((t, i, arr) => Number(t.id) && arr.findIndex((x) => Number(x.id) === Number(t.id)) === i);
+  const macroIds = new Set(state.macroTasks.map((t) => Number(t.id)));
+  state.microTasks = micro
+    .filter((t) => !macroIds.has(Number(t.id)))
+    .filter((t, i, arr) => Number(t.id) && arr.findIndex((x) => Number(x.id) === Number(t.id)) === i);
+
+  [...state.macroTasks, ...state.microTasks].forEach((t) => byId.set(Number(t.id), t));
+  state.tasks = [...byId.values()];
   state.monetag = data.monetag || null;
   renderHeader(data);
   renderTasks();
@@ -174,24 +189,16 @@ async function doMonetagTask(taskId) {
     throw new Error(`Monetag function not found: ${start.show_fn}`);
   }
 
-  if (start.kind === "video") {
-    try {
-      await Promise.resolve(fn("pop"));
-    } catch (_) {
-      await Promise.resolve(fn());
-    }
-  } else {
-    let invoked = false;
-    try {
-      const out = fn({ ymid: start.ymid, requestVar: `task_${taskId}` });
-      invoked = true;
-      await Promise.resolve(out);
-    } catch (_) {
-      // Some Monetag formats expose show_<zone>() with no arguments.
-    }
-    if (!invoked) {
-      await Promise.resolve(fn());
-    }
+  let invoked = false;
+  try {
+    const out = fn({ ymid: start.ymid, requestVar: `task_${taskId}` });
+    invoked = true;
+    await Promise.resolve(out);
+  } catch (_) {
+    // Some Monetag setups expose show_<zone>() with no arguments.
+  }
+  if (!invoked) {
+    await Promise.resolve(fn());
   }
 
   if (start.allow_simulate) {

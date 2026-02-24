@@ -30,20 +30,20 @@ _macro_count = int(os.getenv("MONETAG_MACRO_TASKS_PER_DAY", "4"))
 MONETAG_MACRO_TASKS_PER_DAY = max(1, min(_macro_count, 8))
 
 MICRO_TASKS = [
-    {"id": 1, "title": "Web Visit 15s", "reward": 0.10, "cooldown": 15, "kind": "web", "tier": "micro"},
-    {"id": 2, "title": "Web Visit 30s", "reward": 0.10, "cooldown": 30, "kind": "web", "tier": "micro"},
-    {"id": 3, "title": "Web Visit 50s", "reward": 0.10, "cooldown": 50, "kind": "web", "tier": "micro"},
-    {"id": 4, "title": "Watch Short Video", "reward": 0.10, "cooldown": 45, "kind": "video", "tier": "micro"},
-    {"id": 5, "title": "Watch Rewarded Clip", "reward": 0.12, "cooldown": 60, "kind": "video", "tier": "micro"},
+    {"id": 1, "title": "Rewarded Interstitial 15s", "reward": 0.10, "cooldown": 15, "kind": "web", "tier": "micro"},
+    {"id": 2, "title": "Rewarded Interstitial 30s", "reward": 0.10, "cooldown": 30, "kind": "web", "tier": "micro"},
+    {"id": 3, "title": "Rewarded Interstitial 50s", "reward": 0.10, "cooldown": 50, "kind": "web", "tier": "micro"},
+    {"id": 4, "title": "Rewarded Interstitial 45s", "reward": 0.10, "cooldown": 45, "kind": "web", "tier": "micro"},
+    {"id": 5, "title": "Rewarded Interstitial 60s", "reward": 0.12, "cooldown": 60, "kind": "web", "tier": "micro"},
 ]
 
 MACRO_TEMPLATES = [
-    {"title": "Watch Premium Video", "reward": 0.25, "cooldown": 120, "kind": "video", "tier": "macro"},
-    {"title": "Complete Survey Offer", "reward": 0.35, "cooldown": 180, "kind": "web", "tier": "macro"},
-    {"title": "Open Offer Wall Deal", "reward": 0.30, "cooldown": 150, "kind": "web", "tier": "macro"},
-    {"title": "Watch Long Video", "reward": 0.28, "cooldown": 150, "kind": "video", "tier": "macro"},
-    {"title": "Try Partner Landing Page", "reward": 0.22, "cooldown": 120, "kind": "web", "tier": "macro"},
-    {"title": "Complete Video Challenge", "reward": 0.32, "cooldown": 180, "kind": "video", "tier": "macro"},
+    {"title": "Rewarded Interstitial Premium", "reward": 0.25, "cooldown": 120, "kind": "web", "tier": "macro"},
+    {"title": "Rewarded Interstitial Survey", "reward": 0.35, "cooldown": 180, "kind": "web", "tier": "macro"},
+    {"title": "Rewarded Interstitial Offer", "reward": 0.30, "cooldown": 150, "kind": "web", "tier": "macro"},
+    {"title": "Rewarded Interstitial Extended", "reward": 0.28, "cooldown": 150, "kind": "web", "tier": "macro"},
+    {"title": "Rewarded Interstitial Partner", "reward": 0.22, "cooldown": 120, "kind": "web", "tier": "macro"},
+    {"title": "Rewarded Interstitial Challenge", "reward": 0.32, "cooldown": 180, "kind": "web", "tier": "macro"},
 ]
 
 
