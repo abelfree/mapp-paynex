@@ -27,6 +27,7 @@ ADS_ALLOW_SIMULATE = os.getenv("ADS_ALLOW_SIMULATE", "true").lower() == "true"
 DAILY_LIMIT = int(os.getenv("DAILY_LIMIT", "10"))
 PLAY_DAILY_LIMIT = int(os.getenv("PLAY_DAILY_LIMIT", "5"))
 MIN_WITHDRAW = float(os.getenv("MIN_WITHDRAW", "5.0"))
+USER_REWARD_SHARE_PERCENT = float(os.getenv("USER_REWARD_SHARE_PERCENT", "10"))
 _macro_count = int(os.getenv("MONETAG_MACRO_TASKS_PER_DAY", "4"))
 MONETAG_MACRO_TASKS_PER_DAY = max(1, min(_macro_count, 8))
 
@@ -91,6 +92,17 @@ def today_str() -> str:
 
 def today_int() -> int:
     return int(now().strftime("%Y%m%d"))
+
+
+def share_percent() -> float:
+    return max(0.0, min(USER_REWARD_SHARE_PERCENT, 100.0))
+
+
+def user_reward_from_gross(gross: float) -> float:
+    credited = round(float(gross) * (share_percent() / 100.0), 3)
+    if float(gross) > 0 and credited == 0:
+        return 0.001
+    return credited
 
 
 def db() -> sqlite3.Connection:
@@ -242,11 +254,15 @@ def task_payload(conn: sqlite3.Connection, telegram_id: int, task_map: dict[int,
     out = []
     for task_id, task in task_map.items():
         rem = max(0, int((next_map.get(task_id, datetime(1970, 1, 1, tzinfo=timezone.utc)) - n).total_seconds()))
+        gross = float(task["reward"])
+        user_reward = user_reward_from_gross(gross)
         out.append(
             {
                 "id": task_id,
                 "title": task["title"],
-                "reward": float(task["reward"]),
+                "reward": user_reward,
+                "gross_reward": gross,
+                "share_percent": share_percent(),
                 "remaining_seconds": rem,
                 "kind": task.get("kind", "web"),
                 "tier": task.get("tier", "micro"),
@@ -298,6 +314,7 @@ def state(req: StateRequest):
         "daily_limit": DAILY_LIMIT,
         "play_daily": int(u["play_daily"]),
         "play_limit": PLAY_DAILY_LIMIT,
+        "share_percent": share_percent(),
         "referrals": 0,
         "multiple_accounts": int(c["c"]) > 1,
         "tasks": all_tasks,
@@ -407,7 +424,8 @@ def credit(conn: sqlite3.Connection, session_row: sqlite3.Row) -> bool:
     if int(u["daily_ads"]) >= DAILY_LIMIT:
         return False
 
-    reward = float(session_row["reward"] or 0)
+    gross_reward = float(session_row["reward"] or 0)
+    reward = user_reward_from_gross(gross_reward)
     cooldown = int(session_row["cooldown"] or 30)
     task_id = int(session_row["task_id"])
     if reward <= 0:
@@ -439,6 +457,9 @@ def ad_status(session_id: str):
     out = {
         "credited": bool(s["credited"]),
         "status": s["status"],
+        "gross_reward": float(s["reward"] or 0),
+        "user_reward": user_reward_from_gross(float(s["reward"] or 0)),
+        "share_percent": share_percent(),
         "balance": round(float(u["balance"]), 3),
         "ads_watched": int(u["ads_watched"]),
         "daily_ads": int(u["daily_ads"]),

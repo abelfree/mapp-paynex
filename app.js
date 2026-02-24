@@ -100,8 +100,8 @@ function renderPlayButton() {
 
 function taskMeta(task) {
   const tier = task.tier === "macro" ? "Macro" : "Micro";
-  const kind = task.kind === "video" ? "Video" : "Web";
-  return `${tier} ${kind} Task`;
+  const share = Number(task.share_percent || 10);
+  return `${tier} Rewarded Interstitial (${share}% share)`;
 }
 
 function renderTaskList(container, tasks) {
@@ -219,6 +219,10 @@ async function doMonetagTask(taskId) {
     const status = await api(`/api/ads/status/${start.session_id}`);
     if (status.credited) {
       await loadState();
+      const share = Number(status.share_percent || 10);
+      const userReward = Number(status.user_reward || 0).toFixed(3);
+      const grossReward = Number(status.gross_reward || 0).toFixed(3);
+      alert(`Ad completed. You received ${share}% share: $${userReward} (from $${grossReward}).`);
       return;
     }
     await new Promise((r) => setTimeout(r, 1500));
