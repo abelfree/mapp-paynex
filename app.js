@@ -4,6 +4,9 @@ const state = {
   refreshHandle: null,
 };
 
+const tg = window.Telegram?.WebApp;
+const deviceStorageKey = "paynex_device_id";
+
 const els = {
   welcomeSub: document.getElementById("welcomeSub"),
   balanceText: document.getElementById("balanceText"),
@@ -21,6 +24,20 @@ const els = {
 
 function usd(value) {
   return `$${Number(value).toFixed(3)}`;
+}
+
+function getDeviceId() {
+  let id = window.localStorage.getItem(deviceStorageKey);
+  if (id) return id;
+  id = `dev_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+  window.localStorage.setItem(deviceStorageKey, id);
+  return id;
+}
+
+function getTelegramId() {
+  const fromTelegram = Number(tg?.initDataUnsafe?.user?.id || 0);
+  if (fromTelegram > 0) return fromTelegram;
+  return 1;
 }
 
 function toClock(seconds) {
@@ -102,6 +119,22 @@ async function refreshAll() {
   renderTasks();
 }
 
+async function checkMultipleAccounts() {
+  try {
+    const payload = {
+      telegram_id: getTelegramId(),
+      device_id: getDeviceId(),
+    };
+    const res = await api("/api/account/check", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    els.warningOverlay.hidden = !res.multiple_accounts;
+  } catch {
+    els.warningOverlay.hidden = true;
+  }
+}
+
 async function startTask(taskId) {
   try {
     const data = await api(`/api/tasks/${taskId}/start`, { method: "POST" });
@@ -123,6 +156,7 @@ els.taskList.addEventListener("click", (event) => {
 });
 
 els.withdrawBtn.addEventListener("click", () => {
+  els.warningOverlay.hidden = true;
   els.withdrawOverlay.hidden = false;
 });
 
@@ -167,5 +201,6 @@ els.dismissWarning.addEventListener("click", () => {
 refreshAll().catch((error) => {
   alert(`Failed to load app: ${error.message}`);
 });
+checkMultipleAccounts();
 
 state.refreshHandle = setInterval(stepCooldowns, 1000);

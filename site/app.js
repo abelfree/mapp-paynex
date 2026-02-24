@@ -11,6 +11,19 @@ const tasks = [
 const taskList = document.getElementById('taskList');
 const withdrawOverlay = document.getElementById('withdrawOverlay');
 const warningOverlay = document.getElementById('warningOverlay');
+const warningSeenKey = 'paynex_warning_seen';
+const accountKey = 'paynex_seen_accounts';
+const tg = window.Telegram?.WebApp;
+
+function closeWarning() {
+  warningOverlay.hidden = true;
+  window.sessionStorage.setItem(warningSeenKey, '1');
+}
+
+function openWithdraw() {
+  warningOverlay.hidden = true;
+  withdrawOverlay.hidden = false;
+}
 
 for (const item of tasks) {
   const card = document.createElement('article');
@@ -26,7 +39,7 @@ for (const item of tasks) {
 }
 
 document.getElementById('withdrawBtn').addEventListener('click', () => {
-  withdrawOverlay.hidden = false;
+  openWithdraw();
 });
 
 document.getElementById('closeWithdraw').addEventListener('click', () => {
@@ -40,7 +53,7 @@ document.getElementById('withdrawForm').addEventListener('submit', (event) => {
 });
 
 document.getElementById('dismissWarning').addEventListener('click', () => {
-  warningOverlay.hidden = true;
+  closeWarning();
 });
 
 withdrawOverlay.addEventListener('click', (event) => {
@@ -48,3 +61,28 @@ withdrawOverlay.addEventListener('click', (event) => {
     withdrawOverlay.hidden = true;
   }
 });
+
+if (window.sessionStorage.getItem(warningSeenKey) === '1') {
+  warningOverlay.hidden = true;
+}
+
+function getTelegramId() {
+  const fromTelegram = Number(tg?.initDataUnsafe?.user?.id || 0);
+  if (fromTelegram > 0) return fromTelegram;
+  const demo = Number(window.localStorage.getItem('demoTelegramId') || 1);
+  return demo > 0 ? demo : 1;
+}
+
+function checkMultipleAccountsLocal() {
+  const telegramId = getTelegramId();
+  const raw = window.localStorage.getItem(accountKey);
+  const seen = raw ? JSON.parse(raw) : [];
+  if (!seen.includes(telegramId)) {
+    seen.push(telegramId);
+    window.localStorage.setItem(accountKey, JSON.stringify(seen));
+  }
+  const isMultiple = seen.length > 1;
+  warningOverlay.hidden = !isMultiple;
+}
+
+checkMultipleAccountsLocal();

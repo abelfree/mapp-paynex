@@ -58,6 +58,11 @@ class WithdrawResponse(BaseModel):
     balance: float
 
 
+class AccountCheckRequest(BaseModel):
+    telegram_id: int = Field(gt=0)
+    device_id: str = Field(min_length=8, max_length=128)
+
+
 class StartTaskResponse(BaseModel):
     session_id: str
     ad_url: str
@@ -144,6 +149,14 @@ def setup_db() -> None:
             request_var TEXT,
             payload_json TEXT NOT NULL,
             created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS device_accounts (
+            device_id TEXT NOT NULL,
+            user_id INTEGER NOT NULL,
+            first_seen_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL,
+            PRIMARY KEY(device_id, user_id)
         );
         """
     )
@@ -326,6 +339,29 @@ def list_tasks() -> list[dict[str, Any]]:
     payload = task_with_status(conn, DEMO_USER_ID)
     conn.close()
     return payload
+
+
+@app.post("/api/account/check")
+def account_check(req: AccountCheckRequest) -> dict[str, Any]:
+    now = utcnow().isoformat()
+    conn = db()
+    conn.execute(
+        """
+        INSERT INTO device_accounts (device_id, user_id, first_seen_at, last_seen_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(device_id, user_id)
+        DO UPDATE SET last_seen_at = excluded.last_seen_at
+        """,
+        (req.device_id, req.telegram_id, now, now),
+    )
+    row = conn.execute(
+        "SELECT COUNT(DISTINCT user_id) AS c FROM device_accounts WHERE device_id = ?",
+        (req.device_id,),
+    ).fetchone()
+    conn.commit()
+    conn.close()
+    account_count = int(row["c"]) if row else 0
+    return {"multiple_accounts": account_count > 1, "account_count": account_count}
 
 
 @app.post("/api/tasks/{task_id}/start", response_model=StartTaskResponse)
