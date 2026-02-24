@@ -7,8 +7,10 @@ if (tg) {
 const API_BASE = (() => {
   const p = new URLSearchParams(window.location.search);
   const raw = (p.get("api") || "").trim();
-  if (!raw) return "";
-  return raw.replace(/\/+$/, "");
+  if (raw) return raw.replace(/\/+$/, "");
+  const host = window.location.hostname;
+  if (host === "localhost" || host === "127.0.0.1") return "";
+  return "https://mapp-paynex.onrender.com";
 })();
 
 const refs = {
