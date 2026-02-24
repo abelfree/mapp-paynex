@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = BASE_DIR / "mapp.db"
+DB_PATH = Path(os.getenv("DB_PATH", str(BASE_DIR / "mapp.db")))
 load_dotenv(BASE_DIR.parent / ".env")
 
 MONETAG_SDK_SRC = os.getenv("MONETAG_SDK_SRC", "").strip()
