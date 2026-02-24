@@ -170,6 +170,7 @@ h1 { margin: 0; font-size: 1.95rem; }
   padding: 16px;
   background: rgba(20, 21, 29, 0.54);
 }
+.overlay[hidden] { display: none !important; }
 
 .modal {
   width: min(96vw, 430px);

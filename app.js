@@ -226,6 +226,7 @@ refs.withdrawForm.addEventListener("submit", async (event) => {
 });
 
 async function boot() {
+  refs.withdrawOverlay.hidden = true;
   const u = getTelegramUser();
   state.telegramId = u.id;
   state.username = u.name;
